@@ -7,11 +7,189 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-from seqeval.metrics import accuracy_score, f1_score, precision_score, recall_score
+#from seqeval.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.metrics import confusion_matrix, matthews_corrcoef
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+
+import yaml
+from copy import deepcopy
+import argparse
+from transformers import set_seed
+
+import json
+
+from sklearn.metrics import (
+    accuracy_score as sk_accuracy,
+    precision_score as sk_precision,
+    recall_score as sk_recall,
+    f1_score as sk_f1,
+    matthews_corrcoef,
+)
+
+from sklearn.model_selection import KFold
+import numpy as np
+import seaborn as sns
+
+
+def run_fold(
+    fold_idx: int,
+    train_list: list,
+    test_list: list,
+    model_checkpoint: str,
+    id2label: dict,
+    label2id: dict,
+    tokenizer,
+    base_output_dir: str,
+    train_args_cfg: dict,
+    seed: int,
+):
+    # tokenization
+    train_ds = Dataset.from_list(train_list).map(lambda x: tokenize_and_align(x, tokenizer), batched=False)
+    test_ds  = Dataset.from_list(test_list).map(lambda x: tokenize_and_align(x, tokenizer), batched=False)
+
+    # model
+    model = AutoModelForTokenClassification.from_pretrained(
+        model_checkpoint,
+        num_labels=len(label2id),
+        id2label=id2label,
+        label2id=label2id,
+        use_safetensors=True,
+    )
+
+    # collator
+    collator = DataCollatorForTokenClassification(tokenizer)
+
+    # per-fold output dir
+    fold_out = os.path.join(base_output_dir, f"fold{fold_idx}")
+    os.makedirs(fold_out, exist_ok=True)
+
+    # TrainingArguments
+    ta = TrainingArguments(
+        output_dir=fold_out,
+        eval_strategy=train_args_cfg.get("eval_strategy", "epoch"),
+        save_strategy=train_args_cfg.get("save_strategy", "no"),  # usually "no" for CV speed
+        learning_rate=float(train_args_cfg.get("learning_rate", 2e-5)),
+        per_device_train_batch_size=int(train_args_cfg.get("per_device_train_batch_size", 8)),
+        per_device_eval_batch_size=int(train_args_cfg.get("per_device_eval_batch_size", 8)),
+        num_train_epochs=float(train_args_cfg.get("num_epochs", 10)),
+        weight_decay=float(train_args_cfg.get("weight_decay", 0.01)),
+        logging_dir=os.path.join(fold_out, "logs"),
+        logging_steps=int(train_args_cfg.get("logging_steps", 10)),
+        save_total_limit=int(train_args_cfg.get("save_total_limit", 2)),
+        gradient_accumulation_steps=int(train_args_cfg.get("gradient_accumulation_steps", 1)),
+        warmup_ratio=float(train_args_cfg.get("warmup_ratio", 0.0)),
+        fp16=bool(train_args_cfg.get("fp16", False)),
+        dataloader_num_workers=int(train_args_cfg.get("dataloader_num_workers", 0)),
+        dataloader_pin_memory=bool(train_args_cfg.get("dataloader_pin_memory", False)),
+        report_to=train_args_cfg.get("report_to", []),
+        seed=seed,
+        data_seed=seed,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=ta,
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
+        tokenizer=tokenizer,
+        data_collator=collator,
+        compute_metrics=lambda x: compute_metrics(x, id2label, ta.output_dir),
+    )
+
+    trainer.train()
+
+    # Evaluate on the held-out fold
+    metrics = trainer.evaluate(eval_dataset=test_ds)  # returns dict with eval_*
+    # Strip the "eval_" prefix for aggregation cleanliness
+    cleaned = {k.removeprefix("eval_"): v for k, v in metrics.items()}
+    # Save per-fold metrics
+    with open(os.path.join(fold_out, "metrics.json"), "w") as f:
+        json.dump(cleaned, f, indent=2)
+    return cleaned
+
+def as_float(x, default=None):
+    if x is None:
+        return default
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+    
+def load_config(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+def merge_overrides(cfg: dict, args: argparse.Namespace) -> dict:
+    cfg = deepcopy(cfg)
+
+    # Root-level overrides
+    root_overrides = {
+        "model_checkpoint": args.model_checkpoint,
+        "output_dir": args.output_dir,
+        "trainer_output_dir": args.trainer_output_dir,
+        "train_dir": args.train_dir,
+        "test_dir": args.test_dir,
+        "seed": args.seed,
+        "cross_validation": args.cross_validation,
+        "cross_validation_folds": args.cross_validation_folds
+    }
+    for k, v in root_overrides.items():
+        if v is not None:
+            cfg[k] = v
+
+    # Training block overrides
+    t = cfg.setdefault("training", {})
+    training_overrides = {
+        "num_epochs": args.num_epochs,
+        "learning_rate": args.learning_rate,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "weight_decay": args.weight_decay,
+        "logging_steps": args.logging_steps,
+        "eval_strategy": args.eval_strategy,
+        "save_strategy": args.save_strategy,
+        "save_total_limit": args.save_total_limit,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "warmup_ratio": args.warmup_ratio,
+        "fp16": args.fp16
+    }
+    for k, v in training_overrides.items():
+        if v is not None:
+            t[k] = v
+
+    return cfg
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Train NER with Hugging Face Transformers (config + CLI overrides).")
+    p.add_argument("--config", type=str, default="config.json", help="Path to JSON config file.")
+
+    # Root overrides
+    p.add_argument("--model-checkpoint", type=str)
+    p.add_argument("--output-dir", type=str)
+    p.add_argument("--trainer-output-dir", type=str)
+    p.add_argument("--train-dir", type=str)
+    p.add_argument("--test-dir", type=str)
+    p.add_argument("--seed", type=int)
+
+    # Training overrides
+    p.add_argument("--num-epochs", type=int)
+    p.add_argument("--learning-rate", type=float)
+    p.add_argument("--per-device-train-batch-size", type=int)
+    p.add_argument("--per-device-eval-batch-size", type=int)
+    p.add_argument("--weight-decay", type=float)
+    p.add_argument("--logging-steps", type=int)
+    p.add_argument("--eval-strategy", type=str, choices=["no", "steps", "epoch"])
+    p.add_argument("--save-strategy", type=str, choices=["no", "steps", "epoch"])
+    p.add_argument("--save-total-limit", type=int)
+    p.add_argument("--gradient-accumulation-steps", type=int)
+    p.add_argument("--warmup-ratio", type=float)
+    p.add_argument("--fp16", type=lambda s: s.lower() in {"1", "true", "yes", "y"}, help="Set true/false to override fp16.")
+    p.add_argument("--cross-validation", dest="cross_validation", type=lambda s: s.lower() in {"1","true","yes","y"}, help="Enable K-fold cross validation")
+    p.add_argument("--cross-validation-k", dest="cross_validation_folds", type=int, help="Number of folds for cross validation")
+
+    return p
 
 
 def read_conll(filepath):
@@ -163,70 +341,83 @@ def compute_span_matches(pred_spans, true_spans, mode="exact"):
     return tp, fp, fn
 
 
-def compute_metrics(p, id2label):
+def compute_metrics(p, id2label, output_dir):
+    # p = (predictions, labels). align_predictions should
+    #  - map to tag strings
+    #  - drop/ignore -100 positions
     predictions, labels = p
-    preds, refs = align_predictions(predictions, labels, id2label)
+    preds, refs = align_predictions(predictions, labels, id2label)  # lists of lists of tag strings
 
-    # Matthews Correlation Coefficient
-    flat_preds = [p for seq in preds for p in seq]
-    flat_refs = [r for seq in refs for r in seq]
+    # Flatten to 1D lists of tags
+    # preds, refs = list[list[str]]
+    flat_preds = [t for seq in preds for t in seq]
+    flat_refs  = [t for seq in refs  for t in seq]
+
+    token_accuracy  = sk_accuracy(flat_refs, flat_preds)
+    token_precision = sk_precision(flat_refs, flat_preds, average="macro", zero_division=0)
+    token_recall    = sk_recall(flat_refs, flat_preds, average="macro", zero_division=0)
+    token_f1        = sk_f1(flat_refs, flat_preds, average="macro", zero_division=0)
 
     mcc = matthews_corrcoef(flat_refs, flat_preds)
-    # print(f'Matthews Correlation Coefficient: {mcc}')
 
-    # Confusion Matrix
-    cm = confusion_matrix(flat_refs, flat_preds)
-    labels = np.unique(flat_refs)
-    cm_df = pd.DataFrame(cm, index=labels, columns=labels)
+    # --- Confusion matrix (avoid shape mismatch) ---
+    all_labels = sorted(set(flat_refs) | set(flat_preds))  # UNION
+    if all_labels:
+        cm = confusion_matrix(flat_refs, flat_preds, labels=all_labels)
+        cm_df = pd.DataFrame(cm, index=all_labels, columns=all_labels)
+        # NOTE: Trainer expects only scalars in the returned dict,
+        # so don't return cm_df here. You can log/save it elsewhere.
+        cm_df.to_csv(f"{output_dir}/confusion_matrix.csv")
 
-    # print("Confusion Matrix (per class):")
+        plt.figure(figsize=(8, 6))
+        # Draw heatmap without color bar
+        ax = sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues', cbar=False, annot_kws={"size": 10, "weight": "bold"}, 
+                        linewidths=0.5, linecolor='gray')
 
-    # token-level scores
-    token_accuracy = accuracy_score(refs, preds)
-    token_precision = precision_score(refs, preds)
-    token_recall = recall_score(refs, preds)
-    token_f1 = f1_score(refs, preds)
+        # Improve annotation contrast dynamically:
+        for text in ax.texts:
+            val = int(text.get_text())
+            # Set text color: white if background is dark, otherwise black
+            threshold = cm_df.values.max() / 2
+            color = 'white' if val > threshold else 'black'
+            text.set_color(color)
 
-    # span-level scores
-    exact_tp, exact_fp, exact_fn = 0, 0, 0
-    overlap_tp, overlap_fp, overlap_fn = 0, 0, 0
-    union_tp, union_fp, union_fn = 0, 0, 0
+        plt.xlabel('Predicted Entity')
+        plt.ylabel('True Entity')
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/confusion_matrix.png")
+        plt.close()
+    else:
+        cm_df = pd.DataFrame()
 
-    for pred_seq, ref_seq in zip(preds, refs):
-        pred_spans = extract_entities(pred_seq)
-        ref_spans = extract_entities(ref_seq)
-
-        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="exact")
-        exact_tp += tp
-        exact_fp += fp
-        exact_fn += fn
-
-        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="overlap")
-        overlap_tp += tp
-        overlap_fp += fp
-        overlap_fn += fn
-
-        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="union")
-        union_tp += tp
-        union_fp += fp
-        union_fn += fn
-
-    def safe_div(a, b):
-        return a / b if b else 0.0
-
+    # --- Span-level metrics ---
+    def safe_div(a, b): return a / b if b else 0.0
     def scores(tp, fp, fn):
         precision = safe_div(tp, tp + fp)
-        recall = safe_div(tp, tp + fn)
-        f1 = (
-            safe_div(2 * precision * recall, precision + recall)
-            if (precision + recall)
-            else 0.0
-        )
+        recall    = safe_div(tp, tp + fn)
+        f1        = safe_div(2 * precision * recall, precision + recall) if (precision + recall) else 0.0
         return precision, recall, f1
 
-    exact_p, exact_r, exact_f1 = scores(exact_tp, exact_fp, exact_fn)
+    exact_tp = exact_fp = exact_fn = 0
+    overlap_tp = overlap_fp = overlap_fn = 0
+    union_tp = union_fp = union_fn = 0
+
+    for pred_seq, ref_seq in zip(preds, refs):
+        pred_spans = extract_entities(pred_seq)  # -> [(start,end,type), ...]
+        ref_spans  = extract_entities(ref_seq)
+
+        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="exact")
+        exact_tp += tp; exact_fp += fp; exact_fn += fn
+
+        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="overlap")
+        overlap_tp += tp; overlap_fp += fp; overlap_fn += fn
+
+        tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="union")
+        union_tp += tp; union_fp += fp; union_fn += fn
+
+    exact_p, exact_r, exact_f1     = scores(exact_tp, exact_fp, exact_fn)
     overlap_p, overlap_r, overlap_f1 = scores(overlap_tp, overlap_fp, overlap_fn)
-    union_p, union_r, union_f1 = scores(union_tp, union_fp, union_fn)
+    union_p, union_r, union_f1     = scores(union_tp, union_fp, union_fn)
 
     return {
         "token_accuracy": token_accuracy,
@@ -328,15 +519,27 @@ def eval_misclassified(trainer, tokenizer, test_dataset, id2label):
 
 
 def main():
-    model_checkpoint = "neurotechnology/BLKT-RoBERTa-MLM-Stage2-Intermediate"
-    output_dir = "output"
-    trainer_output_dir = "output/model"
-    train_dir = "data/conll_train/"
-    test_dir = "data/conll_test/"
-    num_epochs = 10
+    parser = build_arg_parser()
+    cli_args = parser.parse_args()
+    cfg = load_config(cli_args.config)
+    cfg = merge_overrides(cfg, cli_args)
+
+    model_checkpoint = cfg["model_checkpoint"]
+    output_dir = cfg["output_dir"]
+    trainer_output_dir = cfg["trainer_output_dir"]
+    train_dir = cfg["train_dir"]
+    test_dir = cfg["test_dir"]
+    seed = cfg.get("seed", 42)
+    cross_val = bool(cfg.get("cross_validation", False))
+    k_folds = int(cfg.get("cross_validation_k", 5))
+
+    set_seed(seed)
 
     data = load_data(train_dir, test_dir)
-    # Tokenization and Alignment
+
+    label2id = data["label2id"]
+    id2label = data["id2label"]
+
     # Put the token using !huggingface-cli login
     tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)  # , token=HF_TOKEN)
     train_dataset = Dataset.from_list(data["train_data"]).map(
@@ -345,6 +548,59 @@ def main():
     test_dataset = Dataset.from_list(data["test_data"]).map(
         lambda x: tokenize_and_align(x, tokenizer), batched=False
     )
+
+    if cross_val:
+        import numpy as np
+        # 1) Merge datasets
+        all_items = list(data["train_data"]) + list(data["test_data"])
+        n = len(all_items)
+        indices = np.arange(n)
+
+        # 2) KFold splitter (sequence-level)
+        kf = KFold(n_splits=k_folds, shuffle=True, random_state=seed)
+        fold_metrics = []
+
+        for fold_idx, (train_idx, test_idx) in enumerate(kf.split(indices), start=1):
+            train_list = [all_items[i] for i in train_idx]
+            test_list  = [all_items[i] for i in test_idx]
+
+            # Different seed per fold (optional)
+            fold_seed = seed + fold_idx
+
+            m = run_fold(
+                fold_idx=fold_idx,
+                train_list=train_list,
+                test_list=test_list,
+                model_checkpoint=model_checkpoint,
+                id2label=id2label, label2id=label2id,
+                tokenizer=tokenizer,
+                base_output_dir=trainer_output_dir,    # folds saved under this dir
+                train_args_cfg=cfg["training"],
+                seed=fold_seed,
+            )
+            fold_metrics.append(m)
+
+        # 3) Aggregate mean/std across folds (numeric keys only)
+        import numpy as np, json, os
+        # collect all keys that are numeric in all folds
+        keys = [k for k in fold_metrics[0].keys()
+                if all(isinstance(fm.get(k, None), (int, float)) for fm in fold_metrics)]
+
+        means = {k: float(np.mean([fm[k] for fm in fold_metrics])) for k in keys}
+        stds  = {k: float(np.std([fm[k] for fm in fold_metrics], ddof=1)) for k in keys}  # sample std
+
+        summary = {"mean": means, "std": stds, "folds": fold_metrics}
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, "cv_summary.json"), "w") as f:
+            json.dump(summary, f, indent=2)
+
+        # Print a compact summary
+        print("\n=== Cross-Validation Summary ===")
+        for k in keys:
+            print(f"{k}: {means[k]:.4f} ± {stds[k]:.4f}")
+
+        # Skip the single train+eval path if CV was enabled
+        return
 
     # Model Setup
     model = AutoModelForTokenClassification.from_pretrained(
@@ -355,29 +611,37 @@ def main():
         use_safetensors=True,
     )
 
-    # Training Setup
-    args = TrainingArguments(
+    # training args (with safe defaults to avoid freezing)
+    t = cfg["training"]
+    train_args = TrainingArguments(
         output_dir=trainer_output_dir,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        learning_rate=2e-5,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        num_train_epochs=num_epochs,
-        weight_decay=0.01,
+        eval_strategy=t.get("eval_strategy", "epoch"),
+        save_strategy=t.get("save_strategy", "epoch"),
+        learning_rate=as_float(t.get("learning_rate", 2e-5)),
+        per_device_train_batch_size=t.get("per_device_train_batch_size", 8),
+        per_device_eval_batch_size=t.get("per_device_eval_batch_size", 8),
+        num_train_epochs=t.get("num_epochs", 10),
+        weight_decay=t.get("weight_decay", 0.01),
         logging_dir=f"{output_dir}/logs",
-        logging_steps=10,
+        logging_steps=t.get("logging_steps", 10),
+        save_total_limit=t.get("save_total_limit", 2),
+        gradient_accumulation_steps=t.get("gradient_accumulation_steps", 1),
+        warmup_ratio=t.get("warmup_ratio", 0.0),
+        fp16=bool(t.get("fp16", False)),
+        dataloader_num_workers=t.get("dataloader_num_workers", 0),
+        dataloader_pin_memory=bool(t.get("dataloader_pin_memory", False)),
+        report_to=t.get("report_to", []),
     )
 
     # train the model
     trainer = Trainer(
         model=model,
-        args=args,
+        args=train_args,
         train_dataset=train_dataset,
         eval_dataset=test_dataset,
         processing_class=tokenizer,
         data_collator=DataCollatorForTokenClassification(tokenizer),
-        compute_metrics=lambda x: compute_metrics(x, data["id2label"]),
+        compute_metrics=lambda x: compute_metrics(x, data["id2label"], train_args.output_dir),
     )
 
     trainer.train()
