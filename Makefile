@@ -40,3 +40,9 @@ getdict:
 	wget --no-verbose -O 'data/1-lt_LT.zip' https://clarin.vdu.lt/xmlui/bitstream/handle/20.500.11821/64/1-lt_LT.zip
 	unzip -o 'data/1-lt_LT.zip' -d data/lt_dictionary 
 	rm -rf 'data/1-lt_LT.zip'
+
+finetune_modernbert:
+	./scripts/finetune_modern_bert.sh
+	
+finetune_bert:
+	./scripts/finetune_bert.sh

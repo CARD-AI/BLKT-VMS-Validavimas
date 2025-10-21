@@ -4,7 +4,10 @@ This project validates BLKT dataset.
 
 ## Model
 
-We used RoBERTa base model: `neurotechnology/BLKT-RoBERTa-MLM-Stage2-Intermediate`
+Three models from Stage 3 were evaluated:
+- ModernBERT Stage 3 RC 1: `neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1`
+- ModernBERT Stage 3 RC 2: `neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2`
+- RoBERTa Stage 3 RC 3: `neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3`
 
 ## Prerequisites
 
@@ -60,7 +63,8 @@ make all
 
 Run model fine tuning
 ```
-make finetune
+make finetune_roberta
+make finetune_modernbert
 ```
 
 The resulting evaluation metrics are saved in the output/ folder.

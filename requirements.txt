@@ -5,3 +5,4 @@ datasets==3.6.0
 transformers[torch]==4.52.4
 seqeval==1.2.2
 matplotlib==3.10.3
+seaborn==0.13.2
