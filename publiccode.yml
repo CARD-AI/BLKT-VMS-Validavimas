@@ -11,20 +11,17 @@ softwareType: "standalone/desktop"
 description:
   en:
     shortDescription: >
-     A rather short description which
-     is probably useless
+      MLKVM model validation
 
     longDescription: >
-     Very long description of this software, also split
-     on multiple rows. You should note what the software
-     is and why one should need it. We can potentially
-     have many pages of text here.
+      MLKVM model validation using NER
+      task on Lithuanian dataset
 
     features:
       - NER
 
 legal:
-  license: ???
+  license: Apache License, Version 2.0
 
 maintenance:
   type: "community"
