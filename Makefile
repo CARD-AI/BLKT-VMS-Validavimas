@@ -6,7 +6,7 @@ PIP = $(VENV)/bin/pip
 all: prepare_data finetune_modernbertRC1
 
 prepare_python:
-	python -m venv $(VENV)
+	python3.12 -m venv $(VENV)
 	$(PIP) install -r requirements.txt
 
 prepare_data: makedirs getdata

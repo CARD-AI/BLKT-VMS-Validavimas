@@ -9,7 +9,7 @@ Validuoti modeliai:
 
 ## Reikalavimai
 
-- python3
+- python3.12
 - make
 - Huggingface sesija (prisijungiant su huggingface-cli komanda)
 
