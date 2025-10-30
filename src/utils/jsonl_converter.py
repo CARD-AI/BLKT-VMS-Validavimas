@@ -143,16 +143,6 @@ def convert(sourcefile, trgfile):
                     biolabel = "I-" + label
                 curtok = ""
                 continue
-            if text[pos] in set('()[]{}"\'.,;:!?'):
-                if curtok:
-                    conllfile.lines.append((curtok, biolabel))
-                    curtok = ""
-                    if label != "O":
-                        biolabel = "I-" + label
-                conllfile.lines.append((text[pos], biolabel))
-                if label != "O":
-                    biolabel = "I-" + label
-                continue
             curtok += text[pos]
         conllfile.lines.append((curtok, biolabel))
     conllfile.write_output(trgfile)
