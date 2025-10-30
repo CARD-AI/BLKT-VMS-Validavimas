@@ -3,32 +3,21 @@ PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
 
 
-all: prepare_data run
-
-run: non_lt misspelled finetune
+all: prepare_data finetune_modernbertRC1 bias_extract_RC1
 
 prepare_python:
 	python -m venv $(VENV)
 	$(PIP) install -r requirements.txt
 
-prepare_data: makedirs getdata getdict
+prepare_data: makedirs getdata
 	$(PYTHON) src/utils/prepare_jsonl.py
 
-non_lt:
-	$(PYTHON) src/non_lt.py
-
-misspelled:
-	$(PYTHON) src/misspelled.py
-
-finetune:
-	$(PYTHON) src/finetune.py
-
 clean:
-	rm -rf output
 	rm -rf data
+	rm -rf output_modernbert_rc1
 
 makedirs:
-	mkdir -p data output
+	mkdir -p data
 
 getdata:
 	git clone git@github.com:tilde-nlp/MultiLeg-dataset.git
@@ -36,13 +25,35 @@ getdata:
 	cp -r MultiLeg-dataset/data/lt/train data/lt_train
 	rm -rf MultiLeg-dataset
 
-getdict:
-	wget --no-verbose -O 'data/1-lt_LT.zip' https://clarin.vdu.lt/xmlui/bitstream/handle/20.500.11821/64/1-lt_LT.zip
-	unzip -o 'data/1-lt_LT.zip' -d data/lt_dictionary 
-	rm -rf 'data/1-lt_LT.zip'
+finetune_modernbertRC1:
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/finetune.py --config config/modernbert-RC1.yml
 
-finetune_modernbert:
-	./scripts/finetune_modern_bert.sh
+finetune_modernbertRC2:
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/finetune.py --config config/modernbert-RC2.yml
 	
-finetune_bert:
-	./scripts/finetune_bert.sh
+finetune_modernbertRC3:
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/finetune.py --config config/roberta-RC3.yml
+
+bias_extract_RC1: 
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc1_positive.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc1_negative.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc1_skills.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc1_positive.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc1_negative.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc1_skills.csv --mode pronoun --device auto
+
+bias_extract_RC2: 
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc2_positive.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc2_negative.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc2_skills.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc2_positive.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc2_negative.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc2_skills.csv --mode pronoun --device auto
+
+bias_extract_RC3: 
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc3_positive.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc3_negative.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc3_skills.csv --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc3_positive.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/negative_traits.txt --out bias_data/out/bias_inputs_rc3_negative.csv --mode pronoun --device auto
+	TORCHDYNAMO_DISABLE=1 $(PYTHON) src/bias_extract.py --model neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/bias_inputs_rc3_skills.csv --mode pronoun --device auto
