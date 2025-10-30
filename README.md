@@ -15,61 +15,59 @@ Validuoti modeliai:
 - make
 - Huggingface sesija (prisijungiant su huggingface-cli komanda)
 
-8GB VRAM memory
+### Skaičiavimo resursų reikalavimai
+
+Atlikti skaičiavimams reikia 8GB vaizdo plokštės atminties.
 
 ## Duomenų paruošimas
 
 Norint pradėti dirbti su duomenimis, mum reikia prieigos prie:
-- Lithuanian jsonl Named Entity Recognition datasets for train and test sets (https://github.com/tilde-nlp/MultiLeg-dataset/tree/main, folder data/lt/);
+- Lithuanian jsonl Named Entity Recognition duomenų rinkinio su mokinimo ir testavimo duomenimis (https://github.com/tilde-nlp/MultiLeg-dataset/tree/main, direktorijos data/lt/);
 
-Download the files from corresponding links above and place them in data/folder. In total you should have 3 folders:
-- data/lt_dictionary
+Duomenys turi būti atsiųsti į direktorijas:
 - data/lt_test
 - data/lt_train
 
-To automatically download data, run:
-
-```
+Automatiškai galima parsisiųsti duomenis naudojant komandą:
+```bash
 make getdata
 ```
 
-### Convert the data (jsonl to conll)
+### Duomenų pavertimas iš `jsonl` formato į `conll` formatą
 
-Conll is the usual format for using the fine-tuning of Named Entity Recognition (NER) tasks. For this, we are using the conversion scripts in `src/utils/jsonl_converter.py`
+Modelį apmokinant įvardytų esybių atpažinimo uždaviniui naudojamas Conll formatas. Kadangi mūsų duomenys yra `jsonl` formato, juos pasiverčiame į `conll` formatą naudodami `src/utils/jsonl_converter.py` kodą.
 
-To convert the data, run: 
+Norint atlikti pavertimą, paleidžiame kodą:
 
-```
+```bash
 python src/utils/prepare_jsonl.py
 ```
 
-To download and convert data in a single step, run:
-```
+Norint atsisiųsti `jsonl` formato duomenis ir automatiškai juos pasiversti į `conll` formatą, naudojame komandą:
+```bash
 make prepare_data
 ```
-## Run
 
-Create a virtual environment and install dependencies:
-```
+## Programos paleidimas
+
+Sukuriame virtualią python aplinką ir įdiegiame naudojamas bibliotekas su komanda:
+```bash
 make prepare_python
 ```
 
-Download datasets, prepare them, run fine tuning and evaluation of datasets lithuanian metrics, run:
-```
+Parsisiunčiame duomenis, juos paruošiame, paleidžiame modelio apmokinimo kodą ir atliekame įvertinimą su komanda:
+```bash
 make all
 ```
 
-### Finetune the model
+### Modelio apmokinimas
 
-Finetune base MLKV model and evaluate it using our dataset
-```
+Modelį apmokiname įvardytų esybių atpažinimo uždaviniui ir atliekame įvertinimą su komanda:
+```bash
 make finetune_modernbertRC1
 ```
 
-The resulting evaluation metrics are saved in the `output_modernbert_rc1` folder.
-
-
-## Evaluation Metrics
+## Skaičiuojami įvertinimo rodikliai
 
 _Token-Level:_
 - Accuracy
