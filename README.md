@@ -1,101 +1,139 @@
-# BLKT VMS
+# MLKVM validavimo sprendimas
 
-This project validates BLKT dataset.
+MLKVM modelio kokybės validavimas pagal vieną iš GLUE (angl. General Language Understanding Evaluation) vertinimo metodikoje (https://gluebenchmark.com/) numatytų vertinimo užduočių: įvardytų esybių atpažinimas.
 
-## Model
+## Modelis
 
-Three models from Stage 3 were evaluated:
-- ModernBERT Stage 3 RC 1: `neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1`
-- ModernBERT Stage 3 RC 2: `neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2`
-- RoBERTa Stage 3 RC 3: `neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3`
+Validuoti modeliai:
+- ModernBERT Stage 3 RC 1: [neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1](https://huggingface.co/neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1)
+- ModernBERT Stage 3 RC 2: [neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2](https://huggingface.co/neurotechnology/BLKT-ModernBert-MLM-Stage3-RC2)
+- RoBERTa Stage 3 RC 3: [neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3](https://huggingface.co/neurotechnology/BLKT-RoBerta-MLM-Stage3-RC3)
 
-## Prerequisites
+## Reikalavimai
 
-- python3
+- python3.12
 - make
-- Huggingface session (logged in through huggingface-cli command)
+- Huggingface sesija (prisijungiant su huggingface-cli komanda)
 
-## Data preparation
+### Skaičiavimo resursų reikalavimai
 
-To start working with the data, we need to access:
-- Lithuanian dictionaries to calculate proportions (https://clarin.vdu.lt/xmlui/handle/20.500.11821/64, archive 1-lt_LT.zip);
-- Lithuanian jsonl Named Entity Recognition datasets for train and test sets (https://github.com/tilde-nlp/MultiLeg-dataset/tree/main, folder data/lt/);
+Atlikti skaičiavimams reikia 8GB vaizdo plokštės atminties.
 
-Download the files from corresponding links above and place them in data/folder. In total you should have 3 folders:
-- data/lt_dictionary
+## Duomenų paruošimas
+
+Norint pradėti dirbti su duomenimis, mum reikia prieigos prie:
+- Lithuanian jsonl Named Entity Recognition duomenų rinkinio su mokinimo ir testavimo duomenimis (https://github.com/tilde-nlp/MultiLeg-dataset/tree/main, direktorijos data/lt/);
+
+Duomenys turi būti atsiųsti į direktorijas:
 - data/lt_test
 - data/lt_train
 
-To automatically download data, run:
-
-```
+Automatiškai galima parsisiųsti duomenis naudojant komandą:
+```bash
 make getdata
-make getdict
 ```
 
-### Convert the data (jsonl to conll)
+### Duomenų pavertimas iš `jsonl` formato į `conll` formatą
 
-Conll is the usual format for using the fine-tuning of Named Entity Recognition (NER) tasks. For this, we are using the conversion scripts in `src/utils/jsonl_converter.py`
+Modelį apmokinant įvardytų esybių atpažinimo uždaviniui naudojamas Conll formatas. Kadangi mūsų duomenys yra `jsonl` formato, juos pasiverčiame į `conll` formatą naudodami `src/utils/jsonl_converter.py` kodą.
 
-To convert the data, run: 
+Norint atlikti pavertimą, paleidžiame kodą:
 
-```
+```bash
 python src/utils/prepare_jsonl.py
 ```
 
-To download and convert data in a single step, run:
-```
+Norint atsisiųsti `jsonl` formato duomenis ir automatiškai juos pasiversti į `conll` formatą, naudojame komandą:
+```bash
 make prepare_data
 ```
-## Run
 
-Create a virtual environment and install dependencies:
-```
+## Programos paleidimas
+
+Sukuriame virtualią python aplinką ir įdiegiame naudojamas bibliotekas su komanda:
+```bash
 make prepare_python
 ```
 
-Download datasets, prepare them, run fine tuning and evaluation of datasets lithuanian metrics, run:
-```
+Parsisiunčiame duomenis, juos paruošiame, paleidžiame modelio apmokinimo kodą ir atliekame įvertinimą su komanda:
+```bash
 make all
 ```
 
-### Finetune the model
+### Modelio apmokinimas
 
-Run model fine tuning
-```
-make finetune_roberta
-make finetune_modernbert
-```
-
-The resulting evaluation metrics are saved in the output/ folder.
-
-### Evaluate lithuanian datasets
-
-To evaluate how many lithuanian words are misspelled in the dataset, run:
-```
-make misspelled
+Modelį apmokiname įvardytų esybių atpažinimo uždaviniui ir atliekame įvertinimą su komanda:
+```bash
+make finetune_modernbertRC1
 ```
 
-To evaluate how many non lithuanian words are in the dataset, run:
+## Skaičiuojami įvertinimo rodikliai
+
+Kiekvienas modelis apmokymo metu yra įvertinamas šiomis metrikomis:
+
+1. **Teksto vienetų (angl. *tokens*) lygiu:**
+   - Tikslumas  
+   - Preciziškumas  
+   - Atkūrimo statistika  
+   - F1 statistika  
+
+2. **Esybių (angl. *entities*) lygiu:**  
+   Modelio veikimas vertinamas pagal preciziškumą, atkūrimo statistiką ir F1 rodiklį, taikant skirtingus atitikimo kriterijus:
+   - **Tikslus atitikimas** (*exact match*) – esybės tipas ir visa jos sritis (pradžia ir pabaiga) turi tiksliai sutapti.  
+   - **Persidengiantis atitikimas** (*overlap match*) – laikoma teisinga, jei bent vienas žodis sutampa su ta pačia žyme.  
+   - **Sąjungos atitikimas** (*union match*) – laikoma teisinga, jei prognozė bet kaip persidengia su tikrąja esybe.  
+
+
+
+## MLKVM šališkumo matavimas
+
+Šis projektas paremtas [keitakurita/contextual_embedding_bias_measure](https://github.com/keitakurita/contextual_embedding_bias_measure) metodologija, skirta vertinti **šališkumą kontekstiniuose kalbos modelių įterpiniuose**.
+
+Originali biblioteka buvo sukurta Python 3.7 versijai ir senesnėms `transformers` bibliotekos versijoms, todėl nebuvo suderinama su naujesnėmis architektūromis (pvz., ModernBERT, RoBERTa).  
+Ši adaptuota versija pateikia pakeitimus, leidžiančius vykdyti vertinimą šiuolaikinėje aplinkoje (Python 3.10+, naujausios `transformers` ir `torch` versijos).
+
+### Pagrindinė Idėja
+
+Metodologija matuoja modelio **šališkumą**, lygindama, kaip modelis vertina skirtingus kandidatus (pvz., savybes, profesijas ar techninius įgūdžius) įvairiuose kontekstuose.  
+Vietoje originalios papildinio struktūros, ši versija procesą padalija į du aiškius etapus:
+
+1. **Modelio Vykdymas (`bias_extract.py`)**  
+   - Įkelia pasirinktus Hugging Face modelius (pvz., ModernBERT RC1–RC3).  
+   - Generuoja CSV failus (`bias_inputs_*.csv`, `raw_pronoun_*.csv`), kuriuose pateikiamos logaritminės tikimybės, top-k žetonų prognozės ir kontekstiniai duomenys kiekvienam modeliui.  
+   - Rezultatai išsaugomi kataloge `out/`.
+
+2. **Rezultatų Analizė (`bias_processing.ipynb`)**  
+   - Nuskaito sugeneruotus CSV failus iš `out/` katalogo.  
+   - Atlieka duomenų agregavimą, vizualizaciją ir šališkumo metrikų skaičiavimus (pvz., logaritminių tikimybių skirtumai tarp „He“ ir „She“).
+
+### Skriptų Vykdymas
+
+Norint paleisti visus šališkumo skriptus, naudokite komandą:
+```bash
+make bias_extract_all
 ```
-make non_lt
+
+Norint vykdyti šališkumo ištraukimo skriptus be make, galima naudoti tiesioginius python iškvietimus.
+
+Pavyzdys (ATTR režimas):
+```bash
+python bias_data/run_bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc1_positive.csv --device auto
 ```
 
-## Evaluation Metrics
+Pavyzdys (PRONOUN režimas):
+```bash
+python bias_data/run_bias_extract.py --model neurotechnology/BLKT-ModernBert_
+```
 
-_Token-Level:_
-- Accuracy
-- Precision
-- Recall
-- F1-score
+### Pakeitimai
 
-_Entity-Level:_
-- Exact Match: Full span and type must match
-- Overlap Match: Any token overlap with same label counts
-- Union Match: Prediction overlaps in any way with true entity
+- Pašalintos priklausomybės nuo pasenusių bibliotekų (`allennlp`, `pytorch-pretrained-bert`).  
+- Pakeista į `transformers.AutoModelForMaskedLM` ir `AutoTokenizer`, naudojant `trust_remote_code`.  
+- Pridėtas CLI pagrindu veikiantis paleidiklis, palaikantis bet kurį Hugging Face modelį.  
+- Išvestys išsaugomos `.csv` formatu, kad būtų patogu analizuoti Jupyter užrašuose.
 
-_Each of these includes:_
-- Precision
-- Recall
-- F1-score
+### Šaltinis
 
+Metodologijos pagrindas:  
+> Keita Kurita ir kt., *„Measuring Bias in Contextualized Word Representations“*, 2019.  
+> [https://github.com/keitakurita/contextual_embedding_bias_measure](https://github.com/keitakurita/contextual_embedding_bias_measure)

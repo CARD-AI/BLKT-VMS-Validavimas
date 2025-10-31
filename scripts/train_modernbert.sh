@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=2 python src/finetune.py --config config/modernbert-RC1.yml

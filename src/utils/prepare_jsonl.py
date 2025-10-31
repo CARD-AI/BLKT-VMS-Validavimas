@@ -18,5 +18,5 @@ def main():
 
 
 if __name__ == "__main__":
-    print("Converting...")
+    print("Keičiami jsonl failai į conll failus...")
     main()

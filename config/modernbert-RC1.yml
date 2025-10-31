@@ -19,4 +19,4 @@ training:
   save_total_limit: 2
   gradient_accumulation_steps: 1
   warmup_ratio: 0.0
-  fp16: true      
+  fp16: true

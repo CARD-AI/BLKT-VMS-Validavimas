@@ -7,7 +7,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-#from seqeval.metrics import accuracy_score, f1_score, precision_score, recall_score
+
 from sklearn.metrics import confusion_matrix, matthews_corrcoef
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +16,7 @@ import pandas as pd
 import yaml
 from copy import deepcopy
 import argparse
-from transformers import set_seed
+from transformers.trainer_utils import set_seed
 
 import json
 
@@ -25,13 +25,13 @@ from sklearn.metrics import (
     precision_score as sk_precision,
     recall_score as sk_recall,
     f1_score as sk_f1,
-    matthews_corrcoef,
 )
 
 from sklearn.model_selection import KFold
-import numpy as np
 import seaborn as sns
+import torch
 
+torch.cuda.set_device(0)
 
 def run_fold(
     fold_idx: int,
@@ -108,14 +108,6 @@ def run_fold(
     with open(os.path.join(fold_out, "metrics.json"), "w") as f:
         json.dump(cleaned, f, indent=2)
     return cleaned
-
-def as_float(x, default=None):
-    if x is None:
-        return default
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return default
     
 def load_config(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -407,17 +399,23 @@ def compute_metrics(p, id2label, output_dir):
         ref_spans  = extract_entities(ref_seq)
 
         tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="exact")
-        exact_tp += tp; exact_fp += fp; exact_fn += fn
+        exact_tp += tp
+        exact_fp += fp
+        exact_fn += fn
 
         tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="overlap")
-        overlap_tp += tp; overlap_fp += fp; overlap_fn += fn
+        overlap_tp += tp
+        overlap_fp += fp
+        overlap_fn += fn
 
         tp, fp, fn = compute_span_matches(pred_spans, ref_spans, mode="union")
-        union_tp += tp; union_fp += fp; union_fn += fn
+        union_tp += tp
+        union_fp += fp
+        union_fn += fn
 
-    exact_p, exact_r, exact_f1     = scores(exact_tp, exact_fp, exact_fn)
+    exact_p, exact_r, exact_f1 = scores(exact_tp, exact_fp, exact_fn)
     overlap_p, overlap_r, overlap_f1 = scores(overlap_tp, overlap_fp, overlap_fn)
-    union_p, union_r, union_f1     = scores(union_tp, union_fp, union_fn)
+    union_p, union_r, union_f1 = scores(union_tp, union_fp, union_fn)
 
     return {
         "token_accuracy": token_accuracy,
@@ -510,7 +508,8 @@ def eval_misclassified(trainer, tokenizer, test_dataset, id2label):
             print(f"Text: {decoded_text}")
             print("Mismatched Tokens:")
             for tok, pred, true in mismatches:
-                print(f"  Token: {tok:15} | Predicted: {pred:10} | True: {true}")
+                decoded = tokenizer.convert_tokens_to_string([tok])
+                print(f"  Token: {decoded:15} | Predicted: {pred:10} | True: {true}")
             print("-" * 60)
             shown += 1
 
@@ -541,16 +540,17 @@ def main():
     id2label = data["id2label"]
 
     # Put the token using !huggingface-cli login
-    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)  # , token=HF_TOKEN)
+    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
     train_dataset = Dataset.from_list(data["train_data"]).map(
-        lambda x: tokenize_and_align(x, tokenizer), batched=False
+        lambda x: tokenize_and_align(x, tokenizer),
+        batched=False,
     )
     test_dataset = Dataset.from_list(data["test_data"]).map(
-        lambda x: tokenize_and_align(x, tokenizer), batched=False
+        lambda x: tokenize_and_align(x, tokenizer),
+        batched=False,
     )
 
     if cross_val:
-        import numpy as np
         # 1) Merge datasets
         all_items = list(data["train_data"]) + list(data["test_data"])
         n = len(all_items)
@@ -581,7 +581,7 @@ def main():
             fold_metrics.append(m)
 
         # 3) Aggregate mean/std across folds (numeric keys only)
-        import numpy as np, json, os
+
         # collect all keys that are numeric in all folds
         keys = [k for k in fold_metrics[0].keys()
                 if all(isinstance(fm.get(k, None), (int, float)) for fm in fold_metrics)]
@@ -617,7 +617,7 @@ def main():
         output_dir=trainer_output_dir,
         eval_strategy=t.get("eval_strategy", "epoch"),
         save_strategy=t.get("save_strategy", "epoch"),
-        learning_rate=as_float(t.get("learning_rate", 2e-5)),
+        learning_rate=float(t.get("learning_rate", 2e-5)),
         per_device_train_batch_size=t.get("per_device_train_batch_size", 8),
         per_device_eval_batch_size=t.get("per_device_eval_batch_size", 8),
         num_train_epochs=t.get("num_epochs", 10),
@@ -648,7 +648,6 @@ def main():
 
     eval_metrics(trainer, train_dataset, test_dataset, output_dir)
     eval_misclassified(trainer, tokenizer, test_dataset, data["id2label"])
-
 
 if __name__ == "__main__":
     main()

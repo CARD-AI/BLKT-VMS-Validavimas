@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-from __future__ import annotations
 import os, csv, json, argparse
 from pathlib import Path
 from typing import List, Tuple
@@ -9,14 +5,13 @@ from typing import List, Tuple
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 
-def info(msg: str): print(f"[INFO] {msg}", flush=True)
 
 def load_tokenizer_model(model_name: str, hf_token: str | None, trust_remote_code: bool, prefer_fast: bool = True):
     common = dict(use_auth_token=hf_token, trust_remote_code=trust_remote_code)
     try:
         tok = AutoTokenizer.from_pretrained(model_name, use_fast=prefer_fast, **common)
     except Exception as e:
-        info(f"Fast tokenizer nepasileido ({e.__class__.__name__}). Perjungiu į use_fast=False.")
+        print(f"Fast tokenizer nepasileido ({e.__class__.__name__}). Perjungiu į use_fast=False.")
         tok = AutoTokenizer.from_pretrained(model_name, use_fast=False, **common)
     mdl = AutoModelForMaskedLM.from_pretrained(model_name, **common)
     return tok, mdl
@@ -43,7 +38,8 @@ def pseudo_logprob_at_mask(text_with_mask: str, candidate: str, tokenizer, model
     mask_pos = None
     for i, tid in enumerate(ids):
         if tid == tokenizer.mask_token_id:
-            mask_pos = i; break
+            mask_pos = i
+            break
     if mask_pos is None:
         raise ValueError(f"Tekste nerasta {tokenizer.mask_token} : {text_with_mask}")
     cand_ids = tokenizer.encode(candidate, add_special_tokens=False)
@@ -52,7 +48,8 @@ def pseudo_logprob_at_mask(text_with_mask: str, candidate: str, tokenizer, model
     s = 0.0
     for i, true_id in enumerate(cand_ids):
         pos = mask_pos + i
-        tmp = list(seq_ids); tmp[pos] = tokenizer.mask_token_id
+        tmp = list(seq_ids)
+        tmp[pos] = tokenizer.mask_token_id
         enc2 = {
             "input_ids": torch.tensor([tmp], device=device),
             "attention_mask": torch.tensor([attn], device=device),
@@ -92,10 +89,12 @@ def main():
     subjects = [s.strip() for s in args.subjects.split(",") if s.strip()]
     candidates = [ln.strip() for ln in Path(args.candidates).read_text(encoding="utf-8").splitlines() if ln.strip()]
 
-    out_path = Path(args.out); out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     arch = "roberta" if "<mask>" in mask_token else "modernbert_or_bert"
 
     if args.mode == "pronoun":
+        print(f"Skaičiuojamas įvardžių šališkumas naudojant kandidatus: {candidates}...")
         # RAW ĮVARDIS: sakinys = "<mask> {prefix}{CAND}{suffix}"
         tmpl = f"{mask_token} {args.raw_prefix}{{CAND}}{args.raw_suffix}".strip()
         with out_path.open("w", newline="", encoding="utf-8") as f:
@@ -113,18 +112,20 @@ def main():
                         "raw_template": tmpl,
                         "subject": subj,
                         "candidate": cand,
-                        "candidate_tokens": " ".join(tok.tokenize(cand)),
+                        "candidate_tokens": " ".join([tok.convert_tokens_to_string([x]) for x in tok.tokenize(cand)]),
                         "logprob_context": lp,
                         "topk_context_json": json.dumps(topk_ctx, ensure_ascii=False),
                     })
-                if i % 50 == 0: info(f"→ {i}/{len(candidates)}")
-        info(f"Baigta (RAW pronoun). CSV: {out_path.resolve()}")
+                if i % 50 == 0: 
+                    print(f"→ {i}/{len(candidates)}")
+        print(f"Baigta (RAW pronoun). CSV: {out_path.resolve()}")
         return
 
-    # ATTR: sakinys = "{SUBJ} ... {MASK}" + kalibracija
-    def mat_mask(s: str) -> str: return s.replace("{MASK}", mask_token)
+    print(f"Skaičiuojamas atributų šališkumas naudojant kandidatus: {candidates}...")
+    # ATTR: sakinys = "{SUBJ} ... {MASK}" + kalibracija    
     tmpls = [t.strip() for t in args.templates.split("|") if t.strip()]
-    tmpls_mat = [mat_mask(t) for t in tmpls]; cal_mat = mat_mask(args.calibration)
+    tmpls_mat = [t.replace("{MASK}", mask_token) for t in tmpls]
+    cal_mat = args.calibration.replace("{MASK}", mask_token)
 
     with out_path.open("w", newline="", encoding="utf-8") as f:
         wr = csv.DictWriter(f, fieldnames=["model_name","arch","template_id","template_text","subject",
@@ -135,7 +136,8 @@ def main():
             for ti, t in enumerate(tmpls_mat):
                 ctx_sent = t.replace("{SUBJ}", subj)
                 if mask_token not in ctx_sent:
-                    info(f"Šablonas be maskės – praleidžiu: '{ctx_sent}'"); continue
+                    print(f"Šablonas be maskės - praleidžiu: '{ctx_sent}'")
+                    continue
                 topk_ctx = topk_at_mask(ctx_sent, tok, mdl, args.topk, device)
                 topk_cal = topk_at_mask(cal_mat, tok, mdl, args.topk, device)
                 for i, cand in enumerate(candidates, 1):
@@ -148,13 +150,13 @@ def main():
                         "template_text": tmpls[ti],  # su {MASK} žmogui
                         "subject": subj,
                         "candidate": cand,
-                        "candidate_tokens": " ".join(tok.tokenize(cand)),
+                        "candidate_tokens": " ".join([tok.convert_tokens_to_string([x]) for x in tok.tokenize(cand)]),
                         "logprob_context": lp_ctx,
                         "logprob_calibration": lp_cal,
                         "topk_context_json": json.dumps(topk_ctx, ensure_ascii=False),
                         "topk_cal_json": json.dumps(topk_cal, ensure_ascii=False),
                     })
-        info(f"Baigta (ATTR). CSV: {out_path.resolve()}")
+        print(f"Baigta (ATTR). CSV: {out_path.resolve()}")
 
 if __name__ == "__main__":
     main()
