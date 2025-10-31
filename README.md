@@ -1,4 +1,4 @@
-# MLKV VMS
+# MLKVM validavimo sprendimas
 
 MLKVM modelio kokybės validavimas pagal vieną iš GLUE (angl. General Language Understanding Evaluation) vertinimo metodikoje (https://gluebenchmark.com/) numatytų vertinimo užduočių: įvardytų esybių atpažinimas.
 
@@ -11,7 +11,7 @@ Validuoti modeliai:
 
 ## Reikalavimai
 
-- python3
+- python3.12
 - make
 - Huggingface sesija (prisijungiant su huggingface-cli komanda)
 
@@ -69,74 +69,71 @@ make finetune_modernbertRC1
 
 ## Skaičiuojami įvertinimo rodikliai
 
-_Token-Level:_
-- Accuracy
-- Precision
-- Recall
-- F1-score
+Kiekvienas modelis apmokymo metu yra įvertinamas šiomis metrikomis:
 
-_Entity-Level:_
-- Exact Match: Full span and type must match
-- Overlap Match: Any token overlap with same label counts
-- Union Match: Prediction overlaps in any way with true entity
+1. **Teksto vienetų (angl. *tokens*) lygiu:**
+   - Tikslumas  
+   - Preciziškumas  
+   - Atkūrimo statistika  
+   - F1 statistika  
 
-_Each of these includes:_
-- Precision
-- Recall
-- F1-score
+2. **Esybių (angl. *entities*) lygiu:**  
+   Modelio veikimas vertinamas pagal preciziškumą, atkūrimo statistiką ir F1 rodiklį, taikant skirtingus atitikimo kriterijus:
+   - **Tikslus atitikimas** (*exact match*) – esybės tipas ir visa jos sritis (pradžia ir pabaiga) turi tiksliai sutapti.  
+   - **Persidengiantis atitikimas** (*overlap match*) – laikoma teisinga, jei bent vienas žodis sutampa su ta pačia žyme.  
+   - **Sąjungos atitikimas** (*union match*) – laikoma teisinga, jei prognozė bet kaip persidengia su tikrąja esybe.  
 
-## Contextual Embedding Bias Measure (adapted version)
 
-This project is based on the [keitakurita/contextual_embedding_bias_measure](https://github.com/keitakurita/contextual_embedding_bias_measure) methodology for evaluating **bias in contextual embeddings** of language models.
 
-The original library was designed for Python 3.7 and older versions of `transformers`, and therefore was not compatible with newer architectures (e.g., ModernBERT, RoBERTa).  
-This adapted version introduces modifications that allow the evaluation to run in a modern environment (Python 3.10+, latest `transformers` and `torch`).
+## MLKVM šališkumo matavimas
 
-### Core Idea
+Šis projektas paremtas [keitakurita/contextual_embedding_bias_measure](https://github.com/keitakurita/contextual_embedding_bias_measure) metodologija, skirta vertinti **šališkumą kontekstiniuose kalbos modelių įterpiniuose**.
 
-The methodology measures model **bias** by comparing how the model evaluates different candidates (e.g., traits, occupations, or technical skills) within various contexts.  
-Instead of using the original plug-in structure, this version separates the process into two clear stages:
+Originali biblioteka buvo sukurta Python 3.7 versijai ir senesnėms `transformers` bibliotekos versijoms, todėl nebuvo suderinama su naujesnėmis architektūromis (pvz., ModernBERT, RoBERTa).  
+Ši adaptuota versija pateikia pakeitimus, leidžiančius vykdyti vertinimą šiuolaikinėje aplinkoje (Python 3.10+, naujausios `transformers` ir `torch` versijos).
 
-1. **Model Execution (`bias_extract.py`)**  
-   - Loads selected Hugging Face models (e.g., ModernBERT RC1-RC3).  
-   - Generates CSV files (`bias_inputs_*.csv`, `raw_pronoun_*.csv`) containing log-probabilities, top-k token predictions, and contextual data for each model.  
-   - The results are saved to the `out/` directory.
+### Pagrindinė Idėja
 
-2. **Results Analysis (`bias_processing.ipynb`)**. 
-   - Reads the generated CSV files from `out/`.  
-   - Performs aggregation, visualization, and bias metric calculations (e.g., log-probability differences between “He” and “She”).
+Metodologija matuoja modelio **šališkumą**, lygindama, kaip modelis vertina skirtingus kandidatus (pvz., savybes, profesijas ar techninius įgūdžius) įvairiuose kontekstuose.  
+Vietoje originalios papildinio struktūros, ši versija procesą padalija į du aiškius etapus:
 
-### Running the Scripts
+1. **Modelio Vykdymas (`bias_extract.py`)**  
+   - Įkelia pasirinktus Hugging Face modelius (pvz., ModernBERT RC1–RC3).  
+   - Generuoja CSV failus (`bias_inputs_*.csv`, `raw_pronoun_*.csv`), kuriuose pateikiamos logaritminės tikimybės, top-k žetonų prognozės ir kontekstiniai duomenys kiekvienam modeliui.  
+   - Rezultatai išsaugomi kataloge `out/`.
 
-To run all bias scripts, use the command
+2. **Rezultatų Analizė (`bias_processing.ipynb`)**  
+   - Nuskaito sugeneruotus CSV failus iš `out/` katalogo.  
+   - Atlieka duomenų agregavimą, vizualizaciją ir šališkumo metrikų skaičiavimus (pvz., logaritminių tikimybių skirtumai tarp „He“ ir „She“).
+
+### Skriptų Vykdymas
+
+Norint paleisti visus šališkumo skriptus, naudokite komandą:
 ```bash
 make bias_extract_all
 ```
 
-To run bias extraction scripts without make, direct python calls can be used.
+Norint vykdyti šališkumo ištraukimo skriptus be make, galima naudoti tiesioginius python iškvietimus.
 
-
-Example (ATTR mode):
-
+Pavyzdys (ATTR režimas):
 ```bash
 python bias_data/run_bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/positive_traits.txt --out bias_data/out/bias_inputs_rc1_positive.csv --device auto
 ```
 
-Example (PRONOUN mode):
-
+Pavyzdys (PRONOUN režimas):
 ```bash
-python bias_data/run_bias_extract.py --model neurotechnology/BLKT-ModernBert-MLM-Stage3-RC1 --candidates bias_data/data_lt/in_demand_tech_skills.txt --out bias_data/out/raw_pronoun_rc1_skills.csv --mode pronoun --device auto
+python bias_data/run_bias_extract.py --model neurotechnology/BLKT-ModernBert_
 ```
 
-### Modifications
+### Pakeitimai
 
-- Removed dependencies on outdated libraries (`allennlp`, `pytorch-pretrained-bert`).  
-- Replaced with `transformers.AutoModelForMaskedLM` and `AutoTokenizer` using `trust_remote_code`.  
-- Added a CLI-based runner to support any Hugging Face model.  
-- Outputs are saved in `.csv` format for flexible analysis in Jupyter notebooks.
+- Pašalintos priklausomybės nuo pasenusių bibliotekų (`allennlp`, `pytorch-pretrained-bert`).  
+- Pakeista į `transformers.AutoModelForMaskedLM` ir `AutoTokenizer`, naudojant `trust_remote_code`.  
+- Pridėtas CLI pagrindu veikiantis paleidiklis, palaikantis bet kurį Hugging Face modelį.  
+- Išvestys išsaugomos `.csv` formatu, kad būtų patogu analizuoti Jupyter užrašuose.
 
-### Source
+### Šaltinis
 
-Methodology based on:  
-> Keita Kurita et al., *"Measuring Bias in Contextualized Word Representations"*, 2019.  
+Metodologijos pagrindas:  
+> Keita Kurita ir kt., *„Measuring Bias in Contextualized Word Representations“*, 2019.  
 > [https://github.com/keitakurita/contextual_embedding_bias_measure](https://github.com/keitakurita/contextual_embedding_bias_measure)
